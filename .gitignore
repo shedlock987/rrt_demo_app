@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# CMake / build
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Common editor/IDE
+.vscode/
+*.swp
+*.swo
