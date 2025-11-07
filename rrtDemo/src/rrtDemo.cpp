@@ -140,6 +140,27 @@ int VisRRT::getNodeCount()
     return rrt_->adjacencyList_.size();
 }
 
+double VisRRT::getNodeX(int idx)
+{
+    Node* n = getNodeAt(idx);
+    if(n) return n->xCrdnt();
+    return 0.0;
+}
+
+double VisRRT::getNodeY(int idx)
+{
+    Node* n = getNodeAt(idx);
+    if(n) return n->yCrdnt();
+    return 0.0;
+}
+
+double VisRRT::getNodeTime(int idx)
+{
+    Node* n = getNodeAt(idx);
+    if(n) return n->time();
+    return 0.0;
+}
+
 bool VisRRT::isComplete()
 {
     return rrt_->isComplete();
@@ -311,6 +332,9 @@ BOOST_PYTHON_MODULE(rrtDemo) {
         .def("getNodeCount", &rrt::VisRRT::getNodeCount)
         .def("getNodeAt", &rrt::VisRRT::getNodeAt, return_value_policy<reference_existing_object>())
         .def("getForwardIndices", &rrt::VisRRT::getForwardIndices)
+            .def("getNodeX", &rrt::VisRRT::getNodeX)
+            .def("getNodeY", &rrt::VisRRT::getNodeY)
+            .def("getNodeTime", &rrt::VisRRT::getNodeTime)
         .def("isAdmissible", &rrt::VisRRT::isAdmissible)
         .def("updateInitialHeading", &rrt::VisRRT::updateInitialHeading)
         ;

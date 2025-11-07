@@ -52,6 +52,13 @@ public:
     int getNodeCount();
     bool isComplete();
     Node* getNodeAt(int idx);
+    // Safe accessors that return node properties by value to avoid exposing
+    // raw pointers into internal containers (which can be invalidated when
+    // the RRT grows). Use these from Python to avoid lifetime / reallocation
+    // issues that can cause segfaults on large trees.
+    double getNodeX(int idx);
+    double getNodeY(int idx);
+    double getNodeTime(int idx);
     bool isAdmissible(Node* node);
     void updateInitialHeading(double _initial_heading);
     boost::python::list getForwardIndices(int idx);
