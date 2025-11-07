@@ -215,6 +215,19 @@ endif()
 
 target_link_libraries(${RRTDEMO_TARGET} ${_LINK_LIBS})
 
+# On macOS Python extension modules often rely on symbols provided by the
+# Python interpreter; allow unresolved Python symbols to be resolved at load
+# time instead of linking against libpython. This uses the Darwin linker
+# option `-undefined dynamic_lookup` which is the common approach for modules.
+if(APPLE)
+    if(COMMAND target_link_options)
+        target_link_options(${RRTDEMO_TARGET} PRIVATE "-undefined" "dynamic_lookup")
+    else()
+        # Fallback for older CMake versions
+        set_target_properties(${RRTDEMO_TARGET} PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+    endif()
+endif()
+
 # === OPTIONAL: Strip in Release ===
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_custom_command(TARGET ${RRTDEMO_TARGET} POST_BUILD
