@@ -88,6 +88,8 @@ rm -rf build
 ```
 
 ## Run the visualizer
+Clone:
+https://github.com/shedlock987/graph_visualizer
 
 After a successful build the Python extension will be under `build/`.
 Run the visualizer (from the repo root):
@@ -96,9 +98,5 @@ Run the visualizer (from the repo root):
 python3 graph_visualizer/graph_visualizer.py
 ```
 
-If you hit issues during configuration or linking (Boost.Python or Python
-library issues), paste the top portion of the CMake configure output and I can
-help adjust the CMake settings for your environment.
 
-Happy hacking!
 
