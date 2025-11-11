@@ -192,7 +192,8 @@ boost::python::list VisRRT::getForwardIndices(int idx)
         return boost::python::list();
     }
     boost::python::list py_list;
-    for (Node* fwd : node->fwd_node_) {
+    const std::vector<Node*>& fwd_nodes = node->getFwdNodes();
+    for (Node* fwd : fwd_nodes) {
         int fwd_idx = rrt_->getIndex(fwd);
         if (fwd_idx >= 0) { // Assuming getIndex returns -1 or similar for invalid
             py_list.append(fwd_idx);
