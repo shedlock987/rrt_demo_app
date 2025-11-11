@@ -215,6 +215,17 @@ endif()
 
 target_link_libraries(${RRTDEMO_TARGET} ${_LINK_LIBS})
 
+# Copy the built Python module to the local prebuilt directory
+set(_local_prebuilt_dir "${REPO_ROOT}/prebuilt")
+message(STATUS "Will copy ${RRTDEMO_TARGET} into local prebuilt dir: ${_local_prebuilt_dir}")
+file(MAKE_DIRECTORY "${_local_prebuilt_dir}")
+add_custom_command(TARGET ${RRTDEMO_TARGET} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:${RRTDEMO_TARGET}>
+        "${_local_prebuilt_dir}/$<TARGET_FILE_NAME:${RRTDEMO_TARGET}>"
+    COMMENT "Copying $<TARGET_FILE_NAME:${RRTDEMO_TARGET}> to ${_local_prebuilt_dir}"
+)
+
 # On macOS Python extension modules often rely on symbols provided by the
 # Python interpreter; allow unresolved Python symbols to be resolved at load
 # time instead of linking against libpython. This uses the Darwin linker
