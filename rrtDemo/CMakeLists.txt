@@ -1,200 +1,157 @@
-cmake_minimum_required(VERSION 3.10)
-project(rrtDemo)
+cmake_minimum_required(VERSION 3.18)  # Supports Python3 3.14+
+project(rrtDemo LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# --------------------------------------------------------------
+# 1. REPOSITORY & WORKSPACE ROOTS
+# --------------------------------------------------------------
+get_filename_component(REPO_ROOT "${CMAKE_SOURCE_DIR}" DIRECTORY)     # .../rrt_demo_app
+get_filename_component(WORKSPACE_ROOT "${REPO_ROOT}" DIRECTORY)      # .../workspace
 
-# === REPOSITORY & WORKSPACE ROOTS ===
-get_filename_component(REPO_ROOT "${CMAKE_SOURCE_DIR}" DIRECTORY)
-get_filename_component(WORKSPACE_ROOT "${REPO_ROOT}" DIRECTORY)
+# --------------------------------------------------------------
+# 2. FIND ACTIVE PYTHON >= 3.14
+# --------------------------------------------------------------
+set(Python3_FIND_STRATEGY LOCATION)      # Prefer active interpreter (venv)
+set(Python3_FIND_REGISTRY NEVER)         # Avoid macOS registry junk
+set(Python3_FIND_FRAMEWORK NEVER)        # We'll handle framework manually
 
-# === FIND ACTIVE PYTHON (venv/conda/system) ===
-set(Python3_FIND_STRATEGY LOCATION)
-set(Python3_FIND_REGISTRY NEVER)
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
+# Require Python 3.14+ with Interpreter + Development
+find_package(Python3 3.14 REQUIRED COMPONENTS Interpreter Development.Module)
 
-# Extract exact paths via sysconfig
+# Extract version
 execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig, sys; print(sysconfig.get_config_var('LIBDIR') or sys.prefix + '/lib')"
-    OUTPUT_VARIABLE Python3_LIBDIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_config_var('INCLUDEDIR'))"
-    OUTPUT_VARIABLE Python3_INCLUDEDIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-# === DYNAMIC BOOST.PYTHON COMPONENT NAME (CORRECT MAPPING) ===
-execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "
-import sys
-major, minor = sys.version_info[:2]
-candidates = [f'boost_python{major}{minor}', f'boost_python{major}', 'boost_python']
-found = None
-for lib in candidates:
-    try:
-        __import__(lib)
-        found = lib
-        break
-    except ImportError:
-        pass
-
-# Map Python import name → Boost CMake component name
-if found:
-    if found == 'boost_python':
-        component = 'python'
-    else:
-        suffix = found[len('boost_python'):]
-        if suffix.isdigit() and len(suffix) == 2:
-            component = f'python{suffix[0]}{suffix[1:]}'  # e.g. 311 → python311
-        elif suffix.isdigit() and len(suffix) == 1:
-            component = f'python{suffix}'
-        else:
-            component = f'python{suffix}'
-else:
-    component = 'python'
-
-print(component)
-"
-    OUTPUT_VARIABLE BOOST_PYTHON_COMPONENT
+    COMMAND "${Python3_EXECUTABLE}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    OUTPUT_VARIABLE _PYTHON_VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-message(STATUS "Using Python: ${Python3_EXECUTABLE}")
-message(STATUS "Python libdir: ${Python3_LIBDIR}")
-message(STATUS "Python includedir: ${Python3_INCLUDEDIR}")
-message(STATUS "Detected Boost.Python component: ${BOOST_PYTHON_COMPONENT}")
+if(Python3_VERSION VERSION_LESS "3.14")
+    message(FATAL_ERROR
+        "Python 3.14+ is required, but found ${_PYTHON_VERSION}.\n"
+        "Current interpreter: ${Python3_EXECUTABLE}\n"
+        "Please activate a virtual environment with Python 3.14+ or install via:\n"
+        "    brew install python@3.14 && python3.14 -m venv venv"
+    )
+endif()
 
-# === FIND BOOST WITH CORRECT COMPONENT ===
-find_package(Boost REQUIRED COMPONENTS ${BOOST_PYTHON_COMPONENT})
+message(STATUS "Using Python ${_PYTHON_VERSION}: ${Python3_EXECUTABLE}")
+message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
+message(STATUS "Python libraries: ${Python3_LIBRARIES}")
 
-# === PLATFORM-SPECIFIC MODULE SUFFIX (macOS uses .so for Python modules) ===
+# macOS: Homebrew framework fallback
+if(APPLE AND NOT EXISTS "${Python3_INCLUDE_DIRS}/Python.h")
+    set(_framework_dir "/opt/homebrew/Frameworks/Python.framework")
+    if(EXISTS "${_framework_dir}/Versions/${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/Headers/Python.h")
+        set(Python3_INCLUDE_DIRS "${_framework_dir}/Versions/${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/Headers")
+        message(STATUS "Using Homebrew Python.framework headers: ${Python3_INCLUDE_DIRS}")
+    endif()
+endif()
+
+# --------------------------------------------------------------
+# 2b. FIND BOOST / BOOST.PYTHON
+# --------------------------------------------------------------
+# Homebrew uses 'python3' component for all Python 3.x
+find_package(Boost 1.65 REQUIRED COMPONENTS python3)
+if(NOT Boost_FOUND)
+    message(WARNING "Boost.Python 'python3' not found, trying 'python'")
+    find_package(Boost REQUIRED COMPONENTS python)
+endif()
+
+message(STATUS "Boost version: ${Boost_VERSION}")
+message(STATUS "Boost include dirs: ${Boost_INCLUDE_DIRS}")
+message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
+
+# --------------------------------------------------------------
+# 3. PLATFORM-SPECIFIC PREBUILT SUBDIR
+# --------------------------------------------------------------
 if(APPLE)
-    set(PY_MODULE_SUFFIX ".so")
+    set(PLATFORM_SUBDIR "macOS")
 else()
-    set(PY_MODULE_SUFFIX ".so")
+    set(PLATFORM_SUBDIR "linux")
 endif()
 
-# === DEPENDENCY: graphLib / rrt_graph_builder ===
-if(EXISTS ${REPO_ROOT}/rrt_graph_builder OR EXISTS ${WORKSPACE_ROOT}/rrt_graph_builder)
-    if(EXISTS ${REPO_ROOT}/rrt_graph_builder)
-        set(_rrt_graph_builder_root "${REPO_ROOT}/rrt_graph_builder")
-    else()
-        set(_rrt_graph_builder_root "${WORKSPACE_ROOT}/rrt_graph_builder")
-    endif()
-    message(STATUS "Using local rrt_graph_builder at ${_rrt_graph_builder_root}")
+# --------------------------------------------------------------
+# 4. LOCATE SIBLING rrt_graph_builder
+# --------------------------------------------------------------
+set(_rrt_graph_builder_root "")
+if(EXISTS "${REPO_ROOT}/rrt_graph_builder")
+    set(_rrt_graph_builder_root "${REPO_ROOT}/rrt_graph_builder")
+elseif(EXISTS "${WORKSPACE_ROOT}/rrt_graph_builder")
+    set(_rrt_graph_builder_root "${WORKSPACE_ROOT}/rrt_graph_builder")
+endif()
 
-    if(APPLE)
-        set(_platform_dir "macOS")
-    else()
-        set(_platform_dir "linux")
-    endif()
+if(NOT _rrt_graph_builder_root)
+    message(FATAL_ERROR "rrt_graph_builder not found in ${REPO_ROOT} or ${WORKSPACE_ROOT}")
+endif()
+message(STATUS "Found rrt_graph_builder at: ${_rrt_graph_builder_root}")
 
-    set(_prebuilt_dir "${_rrt_graph_builder_root}/prebuilt/${_platform_dir}")
-    set(_build_prebuilt_dir "${_rrt_graph_builder_root}/build/graphLib")
-
-    if(EXISTS ${_prebuilt_dir} AND (EXISTS ${_prebuilt_dir}/libgraphLib.a OR EXISTS ${_prebuilt_dir}/libgraphLib.dylib OR EXISTS ${_prebuilt_dir}/libgraphLib.so))
-        message(STATUS "Found platform prebuilt graphLib in ${_prebuilt_dir}")
-        set(graphLib_PREBUILT_DIR ${_prebuilt_dir})
-        set(graphLib_SOURCE_DIR "${_rrt_graph_builder_root}/graphLib")
-    elseif(EXISTS ${_build_prebuilt_dir} AND (EXISTS ${_build_prebuilt_dir}/libgraphLib.a OR EXISTS ${_build_prebuilt_dir}/libgraphLib.dylib OR EXISTS ${_build_prebuilt_dir}/libgraphLib.so))
-        message(STATUS "Found prebuilt graphLib in ${_build_prebuilt_dir}")
-        set(graphLib_PREBUILT_DIR ${_build_prebuilt_dir})
-        set(graphLib_SOURCE_DIR "${_rrt_graph_builder_root}/graphLib")
-    else()
-        add_subdirectory(${_rrt_graph_builder_root}/graphLib ${CMAKE_BINARY_DIR}/_ext/rrt_graph_builder_graphLib EXCLUDE_FROM_ALL)
-        set(graphLib_SOURCE_DIR "${_rrt_graph_builder_root}/graphLib")
-    endif()
-elseif(EXISTS ${REPO_ROOT}/graphLib)
-    message(STATUS "Using local graphLib at ${REPO_ROOT}/graphLib")
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-    set(BUILD_DEMOS OFF CACHE BOOL "" FORCE)
-    set(BUILD_DEMO OFF CACHE BOOL "" FORCE)
-    set(BUILD_RRTDEMO OFF CACHE BOOL "" FORCE)
-    set(BUILD_RRT OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${REPO_ROOT}/graphLib ${CMAKE_BINARY_DIR}/_ext/graphLib EXCLUDE_FROM_ALL)
-    set(graphLib_SOURCE_DIR ${REPO_ROOT}/graphLib)
+# --------------------------------------------------------------
+# 5. PREBUILT GRAPH LIB
+# --------------------------------------------------------------
+set(_graphlib_prebuilt_dir "${_rrt_graph_builder_root}/prebuilt/${PLATFORM_SUBDIR}")
+if(EXISTS "${_graphlib_prebuilt_dir}")
+    message(STATUS "Using prebuilt graphLib from: ${_graphlib_prebuilt_dir}")
+    set(graphLib_PREBUILT_DIR "${_graphlib_prebuilt_dir}")
 else()
-    message(STATUS "graphLib not found locally — fetching via CPM")
-    set(CPM_DIR "${CMAKE_BINARY_DIR}/cmake")
-    set(CPM_FILE "${CPM_DIR}/CPM.cmake")
-    if(NOT EXISTS "${CPM_FILE}")
-        file(MAKE_DIRECTORY "${CPM_DIR}")
-        file(DOWNLOAD "https://github.com/cpm-cmake/CPM.cmake/releases/latest/download/CPM.cmake"
-             "${CPM_FILE}" STATUS _cpm_status LOG _cpm_log SHOW_PROGRESS)
-        list(GET _cpm_status 0 _cpm_code)
-        if(NOT _cpm_code EQUAL 0)
-            message(FATAL_ERROR "Failed to download CPM.cmake: ${_cpm_log}")
-        endif()
-    endif()
-    include("${CPM_FILE}")
-    CPMAddPackage(
-        NAME graphLib
-        GIT_REPOSITORY https://github.com/shedlock987/rrt_graph_builder.git
-        GIT_TAG main
-        SOURCE_SUBDIR graphLib
-    )
-    if(DEFINED CPM_PACKAGE_graphLib_SOURCE_DIR)
-        set(graphLib_SOURCE_DIR "${CPM_PACKAGE_graphLib_SOURCE_DIR}/graphLib")
-        message(STATUS "CPM provided graphLib at: ${graphLib_SOURCE_DIR}")
+    set(_graphlib_build_dir "${_rrt_graph_builder_root}/build/graphLib")
+    if(EXISTS "${_graphlib_build_dir}")
+        set(graphLib_PREBUILT_DIR "${_graphlib_build_dir}")
+    else()
+        add_subdirectory("${_rrt_graph_builder_root}/graphLib"
+                         "${CMAKE_BINARY_DIR}/_ext/rrt_graph_builder_graphLib"
+                         EXCLUDE_FROM_ALL)
     endif()
 endif()
 
-# === INCLUDE DIRECTORIES (target defined later) ===
-# We'll set includes on the target after creation
+# --------------------------------------------------------------
+# 6. CREATE LOCAL PREBUILT DIRECTORY
+# --------------------------------------------------------------
+set(RRTDEMO_PREBUILT_DIR "${REPO_ROOT}/prebuilt/${PLATFORM_SUBDIR}")
+file(MAKE_DIRECTORY "${RRTDEMO_PREBUILT_DIR}")
 
-# === BUILD SHARED PYTHON MODULE ===
-if(POLICY CMP0079)
-    cmake_policy(SET CMP0079 NEW)
-endif()
+# --------------------------------------------------------------
+# 7. BUILD PYTHON MODULE
+# --------------------------------------------------------------
+add_library(rrtDemo SHARED src/rrtDemo.cpp)
+set_target_properties(rrtDemo PROPERTIES
+    PREFIX ""
+    SUFFIX ".so"
+    OUTPUT_NAME "rrtDemo"
+)
 
-if(TARGET rrtDemo)
-    message(STATUS "Reusing existing 'rrtDemo' target")
-    set(RRTDEMO_TARGET rrtDemo)
-else()
-    add_library(rrtDemo SHARED src/rrtDemo.cpp)
-    set(RRTDEMO_TARGET rrtDemo)
-    set_target_properties(${RRTDEMO_TARGET} PROPERTIES
-        PREFIX ""
-        SUFFIX "${PY_MODULE_SUFFIX}"
-        OUTPUT_NAME "rrtDemo"
-    )
-endif()
-
-# === APPLY INCLUDE DIRECTORIES TO TARGET ===
-target_include_directories(${RRTDEMO_TARGET} PRIVATE
+target_compile_features(rrtDemo PRIVATE cxx_std_17)
+target_include_directories(rrtDemo PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${Python3_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
 )
-if(DEFINED graphLib_SOURCE_DIR)
-    target_include_directories(${RRTDEMO_TARGET} PRIVATE ${graphLib_SOURCE_DIR}/include)
-elseif(EXISTS ${REPO_ROOT}/graphLib/include)
-    target_include_directories(${RRTDEMO_TARGET} PRIVATE ${REPO_ROOT}/graphLib/include)
+
+# Include graphLib headers
+if(EXISTS "${_rrt_graph_builder_root}/graphLib/include")
+    target_include_directories(rrtDemo PRIVATE "${_rrt_graph_builder_root}/graphLib/include")
+endif()
+if(graphLib_PREBUILT_DIR AND EXISTS "${graphLib_PREBUILT_DIR}/include")
+    target_include_directories(rrtDemo PRIVATE "${graphLib_PREBUILT_DIR}/include")
 endif()
 
-# === LINK LIBRARIES ===
-set(_LINK_LIBS)
+# --------------------------------------------------------------
+# 8. LINK LIBRARIES
+# --------------------------------------------------------------
+set(_LINK_LIBS ${Boost_LIBRARIES} ${Python3_LIBRARIES})
 
-# Prebuilt graphLib/rrtLib
-if(DEFINED graphLib_PREBUILT_DIR)
+if(graphLib_PREBUILT_DIR)
     if(APPLE)
         foreach(lib IN ITEMS graphLib rrtLib)
-            if(EXISTS ${graphLib_PREBUILT_DIR}/lib${lib}.dylib)
-                list(APPEND _LINK_LIBS "${graphLib_PREBUILT_DIR}/lib${lib}.dylib")
-            elseif(EXISTS ${graphLib_PREBUILT_DIR}/lib${lib}.a)
-                list(APPEND _LINK_LIBS "${graphLib_PREBUILT_DIR}/lib${lib}.a")
+            set(_path "${graphLib_PREBUILT_DIR}/lib${lib}.dylib")
+            if(EXISTS "${_path}")
+                list(APPEND _LINK_LIBS "${_path}")
             endif()
         endforeach()
     else()
         foreach(lib IN ITEMS graphLib rrtLib)
-            if(EXISTS ${graphLib_PREBUILT_DIR}/lib${lib}.so)
-                list(APPEND _LINK_LIBS "${graphLib_PREBUILT_DIR}/lib${lib}.so")
-            elseif(EXISTS ${graphLib_PREBUILT_DIR}/lib${lib}.a)
-                list(APPEND _LINK_LIBS "${graphLib_PREBUILT_DIR}/lib${lib}.a")
+            set(_path "${graphLib_PREBUILT_DIR}/lib${lib}.so")
+            if(EXISTS "${_path}")
+                list(APPEND _LINK_LIBS "${_path}")
             endif()
         endforeach()
     endif()
@@ -207,47 +164,58 @@ else()
     endif()
 endif()
 
-# Boost.Python + Python
-list(APPEND _LINK_LIBS Boost::python ${Python3_LIBRARIES})
-if(Python3_LIBDIR)
-    target_link_directories(${RRTDEMO_TARGET} PRIVATE ${Python3_LIBDIR})
-endif()
+target_link_libraries(rrtDemo ${_LINK_LIBS})
 
-target_link_libraries(${RRTDEMO_TARGET} ${_LINK_LIBS})
-
-# Copy the built Python module to the local prebuilt directory
-set(_local_prebuilt_dir "${REPO_ROOT}/prebuilt")
-message(STATUS "Will copy ${RRTDEMO_TARGET} into local prebuilt dir: ${_local_prebuilt_dir}")
-file(MAKE_DIRECTORY "${_local_prebuilt_dir}")
-add_custom_command(TARGET ${RRTDEMO_TARGET} POST_BUILD
+# --------------------------------------------------------------
+# 9. COPY rrtDemo.so TO PREBUILT
+# --------------------------------------------------------------
+add_custom_command(TARGET rrtDemo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_FILE:${RRTDEMO_TARGET}>
-        "${_local_prebuilt_dir}/$<TARGET_FILE_NAME:${RRTDEMO_TARGET}>"
-    COMMENT "Copying $<TARGET_FILE_NAME:${RRTDEMO_TARGET}> to ${_local_prebuilt_dir}"
+            $<TARGET_FILE:rrtDemo>
+            "${RRTDEMO_PREBUILT_DIR}/rrtDemo.so"
+    COMMENT "Copying rrtDemo.so → ${RRTDEMO_PREBUILT_DIR}"
 )
 
-# On macOS Python extension modules often rely on symbols provided by the
-# Python interpreter; allow unresolved Python symbols to be resolved at load
-# time instead of linking against libpython. This uses the Darwin linker
-# option `-undefined dynamic_lookup` which is the common approach for modules.
-if(APPLE)
-    if(COMMAND target_link_options)
-        target_link_options(${RRTDEMO_TARGET} PRIVATE "-undefined" "dynamic_lookup")
+# --------------------------------------------------------------
+# 10. COPY GRAPHLIB (optional)
+# --------------------------------------------------------------
+option(COPY_GRAPHLIB "Copy libgraphLib into rrtDemo prebuilt dir" ON)
+if(graphLib_PREBUILT_DIR AND COPY_GRAPHLIB)
+    if(APPLE)
+        set(_graphlib_file "${graphLib_PREBUILT_DIR}/libgraphLib.dylib")
     else()
-        # Fallback for older CMake versions
-        set_target_properties(${RRTDEMO_TARGET} PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+        set(_graphlib_file "${graphLib_PREBUILT_DIR}/libgraphLib.so")
+    endif()
+    if(EXISTS "${_graphlib_file}")
+        add_custom_command(TARGET rrtDemo POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_graphlib_file}"
+                    "${RRTDEMO_PREBUILT_DIR}/"
+            COMMENT "Copying libgraphLib → ${RRTDEMO_PREBUILT_DIR}"
+        )
     endif()
 endif()
 
-# === OPTIONAL: Strip in Release ===
+# --------------------------------------------------------------
+# 11. macOS: Allow dynamic Python lookup
+# --------------------------------------------------------------
+if(APPLE)
+    target_link_options(rrtDemo PRIVATE "-undefined" "dynamic_lookup")
+endif()
+
+# --------------------------------------------------------------
+# 12. Strip in Release
+# --------------------------------------------------------------
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_custom_command(TARGET ${RRTDEMO_TARGET} POST_BUILD
-        COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${RRTDEMO_TARGET}>
+    add_custom_command(TARGET rrtDemo POST_BUILD
+        COMMAND ${CMAKE_STRIP} $<TARGET_FILE:rrtDemo>
         COMMENT "Stripping rrtDemo.so"
     )
 endif()
 
-# === (Commented) Executable Demo ===
-#add_executable(rrtDemoMain src/main.cpp)
-#target_link_libraries(rrtDemoMain rrtDemo ${Python3_LIBRARIES} Boost::python)
-#add_dependencies(rrtDemoMain rrtDemo)
+# --------------------------------------------------------------
+# C++ Standard
+# --------------------------------------------------------------
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
