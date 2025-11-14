@@ -8,14 +8,14 @@ get_filename_component(REPO_ROOT "${CMAKE_SOURCE_DIR}" DIRECTORY)     # .../rrt_
 get_filename_component(WORKSPACE_ROOT "${REPO_ROOT}" DIRECTORY)      # .../workspace
 
 # --------------------------------------------------------------
-# 2. FIND ACTIVE PYTHON >= 3.14
+# 2. FIND ACTIVE PYTHON
 # --------------------------------------------------------------
 set(Python3_FIND_STRATEGY LOCATION)      # Prefer active interpreter (venv)
 set(Python3_FIND_REGISTRY NEVER)         # Avoid macOS registry junk
 set(Python3_FIND_FRAMEWORK NEVER)        # We'll handle framework manually
 
-# Require Python 3.14+ with Interpreter + Development
-find_package(Python3 3.14 REQUIRED COMPONENTS Interpreter Development.Module)
+# Require Python 3 with Interpreter + Development
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
 # Extract version
 execute_process(
@@ -23,15 +23,6 @@ execute_process(
     OUTPUT_VARIABLE _PYTHON_VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-
-if(Python3_VERSION VERSION_LESS "3.14")
-    message(FATAL_ERROR
-        "Python 3.14+ is required, but found ${_PYTHON_VERSION}.\n"
-        "Current interpreter: ${Python3_EXECUTABLE}\n"
-        "Please activate a virtual environment with Python 3.14+ or install via:\n"
-        "    brew install python@3.14 && python3.14 -m venv venv"
-    )
-endif()
 
 message(STATUS "Using Python ${_PYTHON_VERSION}: ${Python3_EXECUTABLE}")
 message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
@@ -47,18 +38,11 @@ if(APPLE AND NOT EXISTS "${Python3_INCLUDE_DIRS}/Python.h")
 endif()
 
 # --------------------------------------------------------------
-# 2b. FIND BOOST / BOOST.PYTHON
+# 2b. FIND PYBIND11 
 # --------------------------------------------------------------
-# Homebrew uses 'python3' component for all Python 3.x
-find_package(Boost 1.65 REQUIRED COMPONENTS python3)
-if(NOT Boost_FOUND)
-    message(WARNING "Boost.Python 'python3' not found, trying 'python'")
-    find_package(Boost REQUIRED COMPONENTS python)
-endif()
-
-message(STATUS "Boost version: ${Boost_VERSION}")
-message(STATUS "Boost include dirs: ${Boost_INCLUDE_DIRS}")
-message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
+find_package(pybind11 REQUIRED)
+message(STATUS "Pybind11 version: ${pybind11_VERSION}")
+message(STATUS "Pybind11 include dirs: ${pybind11_INCLUDE_DIRS}")
 
 # --------------------------------------------------------------
 # 3. PLATFORM-SPECIFIC PREBUILT SUBDIR
@@ -111,10 +95,8 @@ file(MAKE_DIRECTORY "${RRTDEMO_PREBUILT_DIR}")
 # --------------------------------------------------------------
 # 7. BUILD PYTHON MODULE
 # --------------------------------------------------------------
-add_library(rrtDemo SHARED src/rrtDemo.cpp)
+pybind11_add_module(rrtDemo src/rrtDemo.cpp)  # Use pybind11_add_module instead of add_library
 set_target_properties(rrtDemo PROPERTIES
-    PREFIX ""
-    SUFFIX ".so"
     OUTPUT_NAME "rrtDemo"
 )
 
@@ -123,7 +105,6 @@ target_include_directories(rrtDemo PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${Python3_INCLUDE_DIRS}
-    ${Boost_INCLUDE_DIRS}
 )
 
 # Include graphLib headers
@@ -137,7 +118,7 @@ endif()
 # --------------------------------------------------------------
 # 8. LINK LIBRARIES
 # --------------------------------------------------------------
-set(_LINK_LIBS ${Boost_LIBRARIES} ${Python3_LIBRARIES})
+set(_LINK_LIBS ${Python3_LIBRARIES})
 
 if(graphLib_PREBUILT_DIR)
     if(APPLE)
@@ -164,7 +145,7 @@ else()
     endif()
 endif()
 
-target_link_libraries(rrtDemo ${_LINK_LIBS})
+target_link_libraries(rrtDemo PRIVATE ${_LINK_LIBS})
 
 # --------------------------------------------------------------
 # 9. COPY rrtDemo.so TO PREBUILT

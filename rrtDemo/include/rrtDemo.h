@@ -1,11 +1,13 @@
 #include <vector>
 #include <memory>
-#include <boost/python.hpp>
+#include <pybind11/pybind11.h>
 #include "rrt.h"
 #include "graph.h"
 
 #ifndef rrtDemo_H_
 #define rrtDemo_H_
+
+namespace py = pybind11;
 
 namespace rrt
 {
@@ -61,7 +63,7 @@ public:
     double getNodeTime(int idx);
     bool isAdmissible(Node* node);
     void updateInitialHeading(double _initial_heading);
-    boost::python::list getForwardIndices(int idx);
+    py::list getForwardIndices(int idx);
 
 private:
     std::unique_ptr<RRT> rrt_;

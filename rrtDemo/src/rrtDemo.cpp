@@ -2,15 +2,14 @@
 #include "graph.h"
 #include "rrt.h"
 #include <iostream>
-#include <boost/python.hpp>
-#include <boost/python/stl_iterator.hpp>
-#include <boost/python/extract.hpp>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>  // Automatic conversion for std::vector, std::tuple, etc.
 #include <vector>
-#include <tuple> // For std::get on pose_t
-#include <algorithm> // For std::find if needed, but using getIndex
-#include <utility> // For std::pair
+#include <tuple>
+#include <algorithm>
+#include <utility>
 
-using namespace boost::python;
+namespace py = pybind11;
 
 namespace rrt
 {
@@ -184,14 +183,14 @@ Node* VisRRT::getNodeAt(int idx)
     return nullptr;
 }
 
-// UPDATED: Return boost::python::list for seamless Python conversion
-boost::python::list VisRRT::getForwardIndices(int idx)
+// UPDATED: Return py::list for seamless Python conversion
+py::list VisRRT::getForwardIndices(int idx)
 {
     Node* node = getNodeAt(idx);
     if (!node) {
-        return boost::python::list();
+        return py::list();
     }
-    boost::python::list py_list;
+    py::list py_list;
     const std::vector<Node*>& fwd_nodes = node->getFwdNodes();
     for (Node* fwd : fwd_nodes) {
         int fwd_idx = rrt_->getIndex(fwd);
@@ -204,144 +203,37 @@ boost::python::list VisRRT::getForwardIndices(int idx)
 
 } // namespace rrt
 
-// Converter for std::tuple<double, double, double, double> from Python tuples (x, y, time, heading)
-class tuple_from_python_converter {
-public:
-    tuple_from_python_converter() {
-        boost::python::converter::registry::push_back(
-            &convertible,
-            &construct,
-            boost::python::type_id<std::tuple<double, double, double, double>>()
-        );
-    }
-private:
-    static void* convertible(PyObject* obj) {
-        if (PyTuple_Check(obj) && PyTuple_Size(obj) == 4) {
-            return obj;
-        }
-        return nullptr;
-    }
-    static void construct(PyObject* obj,
-        boost::python::converter::rvalue_from_python_stage1_data* data) {
-        namespace python = boost::python;
-        python::handle<> handle(python::borrowed(obj));
-        python::tuple py_tuple(handle);
-        double x = python::extract<double>(py_tuple[0]);
-        double y = python::extract<double>(py_tuple[1]);
-        double z = python::extract<double>(py_tuple[2]);
-        double h = python::extract<double>(py_tuple[3]);
-        void* storage = ((python::converter::rvalue_from_python_storage<std::tuple<double, double, double, double>>*)data)->storage.bytes;
-        new (storage) std::tuple<double, double, double, double>(x, y, z, h);
-        data->convertible = storage;
-    }
-};
+PYBIND11_MODULE(rrtDemo, m) {
+    using namespace rrt;
 
-// Converter for rrt::RRT::occupancy_t from Python tuples ((x, y, time, heading), width)
-class occupancy_from_python_converter {
-public:
-    occupancy_from_python_converter() {
-        boost::python::converter::registry::push_back(
-            &convertible,
-            &construct,
-            boost::python::type_id<rrt::RRT::occupancy_t>());
-    }
-private:
-    static void* convertible(PyObject* obj) {
-        if (PyTuple_Check(obj) && PyTuple_Size(obj) == 2) {
-            PyObject* first = PyTuple_GET_ITEM(obj, 0);
-            if (PyTuple_Check(first) && PyTuple_Size(first) == 4) {
-                return obj;
-            }
-        }
-        return nullptr;
-    }
-    static void construct(PyObject* obj,
-        boost::python::converter::rvalue_from_python_stage1_data* data) {
-        // Directly extract using PyTuple_GET_ITEM to avoid vexing parse issues
-        PyObject* py_pose_tuple = PyTuple_GET_ITEM(obj, 0);
-        PyObject* py_width_obj = PyTuple_GET_ITEM(obj, 1);
-        double x = PyFloat_AsDouble(PyTuple_GET_ITEM(py_pose_tuple, 0));
-        double y = PyFloat_AsDouble(PyTuple_GET_ITEM(py_pose_tuple, 1));
-        double t = PyFloat_AsDouble(PyTuple_GET_ITEM(py_pose_tuple, 2));
-        double h = PyFloat_AsDouble(PyTuple_GET_ITEM(py_pose_tuple, 3));
-        double w = PyFloat_AsDouble(py_width_obj);
-        void* storage = ((boost::python::converter::rvalue_from_python_storage<rrt::RRT::occupancy_t>*)data)->storage.bytes;
-        new (storage) rrt::RRT::occupancy_t(std::make_tuple(x, y, t, h), w);
-        data->convertible = storage;
-    }
-};
+    py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")  // Use py::nodelete for raw pointers
+        .def("xCrdnt", &Node::xCrdnt)
+        .def("yCrdnt", &Node::yCrdnt)
+        .def("heading", &Node::heading)
+        .def("time", &Node::time)
+        .def("backEdgeWeight", &Node::backEdgeWeight);
 
-// iterable_converter for vectors
-class iterable_converter {
-public:
-    template <typename Container>
-    iterable_converter& from_python() {
-        boost::python::converter::registry::push_back(
-            &iterable_converter::convertible,
-            &iterable_converter::construct<Container>,
-            boost::python::type_id<Container>());
-        return *this;
-    }
-    static void* convertible(PyObject* object) {
-        return PyObject_GetIter(object) ? object : nullptr;
-    }
-    template <typename Container>
-    static void construct(PyObject* object, boost::python::converter::rvalue_from_python_stage1_data* data) {
-        namespace python = boost::python;
-        python::handle<> handle(python::borrowed(object));
-        typedef python::converter::rvalue_from_python_storage<Container> storage_type;
-        void* storage = reinterpret_cast<storage_type*>(data)->storage.bytes;
-        typedef python::stl_input_iterator<typename Container::value_type> iterator;
-        new (storage) Container(iterator(python::object(handle)), iterator());
-        data->convertible = storage;
-    }
-};
-
-BOOST_PYTHON_MODULE(rrtDemo) {
-    using rrt::pose_t;
-    // Register tuple converter
-    tuple_from_python_converter();
-    occupancy_from_python_converter();
-
-    class_<rrt::Node, boost::noncopyable>("Node", no_init)
-        .def("xCrdnt", &rrt::Node::xCrdnt)
-        .def("yCrdnt", &rrt::Node::yCrdnt)
-        .def("heading", &rrt::Node::heading)
-        .def("time", &rrt::Node::time)
-        .def("backEdgeWeight", &rrt::Node::backEdgeWeight)
-        // Optionally add .def("heading", &rrt::Node::heading) if Node has a heading() method exposed
-        ;
-
-    class_<rrt::VisRRT, boost::noncopyable>("RRT", no_init)
-        .def(init<>()) // Default
-        .def(init<std::vector<rrt::RRT::occupancy_t>, pose_t, pose_t, pose_t, pose_t, double, double, double, double, double, bool, int, int>())
-        .def(init<pose_t, pose_t, pose_t, pose_t, double, double, double, double, double, bool, int, int>())
-        .def("buildRRT", &rrt::VisRRT::buildRRT)
-        .def("stepRRT", &rrt::VisRRT::stepRRT)
-        .def("initializeRRT", static_cast<void (rrt::VisRRT::*)(
-            pose_t, pose_t, pose_t, pose_t,
-            double, double, double, double, double, bool, int, double
-        )>(&rrt::VisRRT::initializeRRT))
-        .def("setBoundaries", static_cast<void (rrt::VisRRT::*)(pose_t, pose_t)>(&rrt::VisRRT::setBoundaries))
-        .def("setOrigin", static_cast<void (rrt::VisRRT::*)(pose_t)>(&rrt::VisRRT::setOrigin))
-        .def("updateDestination", static_cast<void (rrt::VisRRT::*)(pose_t)>(&rrt::VisRRT::updateDestination))
-        .def("updateConstraints", &rrt::VisRRT::updateConstraints)
-        .def("setDim3D", &rrt::VisRRT::setDim3D)
-        .def("setIterationLimit", &rrt::VisRRT::setIterationLimit)
-        .def("setOccupancyMap", static_cast<void (rrt::VisRRT::*)(std::vector<std::vector<double>>, std::vector<double>, std::vector<double>)>(&rrt::VisRRT::setOccupancyMap))
-        .def("isComplete", &rrt::VisRRT::isComplete)
-        .def("getNodeCount", &rrt::VisRRT::getNodeCount)
-        .def("getNodeAt", &rrt::VisRRT::getNodeAt, return_value_policy<reference_existing_object>())
-        .def("getForwardIndices", &rrt::VisRRT::getForwardIndices)
-            .def("getNodeX", &rrt::VisRRT::getNodeX)
-            .def("getNodeY", &rrt::VisRRT::getNodeY)
-            .def("getNodeTime", &rrt::VisRRT::getNodeTime)
-        .def("isAdmissible", &rrt::VisRRT::isAdmissible)
-        .def("updateInitialHeading", &rrt::VisRRT::updateInitialHeading)
-        ;
-
-    iterable_converter()
-        .from_python<std::vector<double>>()
-        .from_python<std::vector<std::vector<double>>>()
-        .from_python<std::vector<rrt::RRT::occupancy_t>>();
+    py::class_<VisRRT>(m, "RRT")
+        .def(py::init<>()) // Default
+        .def(py::init<std::vector<RRT::occupancy_t>, pose_t, pose_t, pose_t, pose_t, double, double, double, double, double, bool, int, int>())
+        .def(py::init<pose_t, pose_t, pose_t, pose_t, double, double, double, double, double, bool, int, int>())
+        .def("buildRRT", &VisRRT::buildRRT)
+        .def("stepRRT", &VisRRT::stepRRT)
+        .def("initializeRRT", &VisRRT::initializeRRT)
+        .def("setBoundaries", &VisRRT::setBoundaries)
+        .def("setOrigin", &VisRRT::setOrigin)
+        .def("updateDestination", &VisRRT::updateDestination)
+        .def("updateConstraints", &VisRRT::updateConstraints)
+        .def("setDim3D", &VisRRT::setDim3D)
+        .def("setIterationLimit", &VisRRT::setIterationLimit)
+        .def("setOccupancyMap", &VisRRT::setOccupancyMap)
+        .def("isComplete", &VisRRT::isComplete)
+        .def("getNodeCount", &VisRRT::getNodeCount)
+        .def("getNodeAt", &VisRRT::getNodeAt, py::return_value_policy::reference)
+        .def("getForwardIndices", &VisRRT::getForwardIndices)
+        .def("getNodeX", &VisRRT::getNodeX)
+        .def("getNodeY", &VisRRT::getNodeY)
+        .def("getNodeTime", &VisRRT::getNodeTime)
+        .def("isAdmissible", &VisRRT::isAdmissible)
+        .def("updateInitialHeading", &VisRRT::updateInitialHeading);
 }
