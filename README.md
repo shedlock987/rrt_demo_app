@@ -1,6 +1,6 @@
 # rrt_demo_app
 
-Example/Demo application that builds a Python extension (Boost.Python) around the
+Example/Demo application that builds a Python extension (Pybind11) around the
 `rrt_graph_builder` library and provides a small visualizer in
 `graph_visualizer/`.
 
@@ -19,19 +19,19 @@ xcode-select --install
 
 # Homebrew packages
 brew update
-brew install cmake boost python
+brew install cmake pybind11 python
 
 # Optional: create / use a Python virtualenv
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel
-pip install matplotlib numpy
+pip install pybind11 matplotlib numpy
 ```
 
 Notes:
-- Homebrew's `boost` includes Boost.Python components for the active Python.
-- If Boost.Python cannot be found, ensure the `python3` from Homebrew is first
-	on your PATH when configuring CMake.
+- Homebrew's `pybind11` provides the necessary headers and CMake config.
+- If Pybind11 cannot be found, ensure the `python3` from Homebrew is first
+    on your PATH when configuring CMake.
 
 ### Linux (Ubuntu/Debian)
 
@@ -41,21 +41,19 @@ Install the common build dependencies (package names vary by distro/version):
 # update
 sudo apt update
 
-# basic build tools, CMake, Python dev headers and Boost
-sudo apt install -y build-essential cmake python3-dev python3-venv \
-		libboost-all-dev
+# basic build tools, CMake, Python dev headers
+sudo apt install -y build-essential cmake python3-dev python3-venv
 
 # Optional: create virtualenv and install python deps
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel
-pip install matplotlib numpy
+pip install pybind11 matplotlib numpy
 ```
 
 Notes:
-- On some distributions you may need specific Boost.Python packages (for
-	example `libboost-python3-dev` or `libboost-python1.74-dev`). If CMake
-	cannot find Boost.Python, search your distro packages for `boost-python`.
+- Pybind11 is installed via pip for simplicity; it provides the headers and
+    CMake config needed.
 
 ## Prebuilt libraries (optional)
 
