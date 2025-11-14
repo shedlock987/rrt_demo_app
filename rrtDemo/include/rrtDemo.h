@@ -1,0 +1,76 @@
+#include <vector>
+#include <memory>
+#include <pybind11/pybind11.h>
+#include "rrt.h"
+#include "graph.h"
+
+#ifndef rrtDemo_H_
+#define rrtDemo_H_
+
+namespace py = pybind11;
+
+namespace rrt
+{
+
+using pose_t = std::tuple<double, double, double, double>;
+
+class VisRRT
+{
+public:
+    VisRRT();
+    VisRRT(std::vector<std::pair<pose_t, double>> _occupancy_map,
+           pose_t _range_a, pose_t _range_b,
+           pose_t _origin, pose_t _dest,
+           double _max_angle_rad, double _max_dist,
+           double _min_dist, double _max_interval,
+           double _max_time, bool _dim_3D, int _iteration_limit,
+           int _max_admissible,
+           double _max_long_accel, double _max_long_jerk, double _max_kappa_rad);
+    VisRRT(pose_t _range_a, pose_t _range_b,
+           pose_t _origin, pose_t _dest,
+           double _max_angle_rad, double _max_dist,
+           double _min_dist, double _max_interval,
+           double _max_time, bool _dim_3D, int _iteration_limit,
+           int _max_admissible,
+           double _max_long_accel, double _max_long_jerk, double _max_kappa_rad);
+    ~VisRRT();
+
+    void buildRRT();
+    bool stepRRT();
+    void initializeRRT(
+        pose_t _range_a, pose_t _range_b,
+        pose_t _origin, pose_t _dest,
+        double _max_angle_rad, double _max_dist,
+        double _min_dist, double _max_interval,
+        double _max_time, bool _dim_3D, int _iteration_limit,
+        double _initial_heading);
+    void setBoundaries(pose_t _range_a, pose_t _range_b);
+    void setOrigin(pose_t _origin);
+    void updateDestination(pose_t _dest);
+    void updateConstraints(double _max_angle_rad, double _max_dist, double _min_dist, double _max_interval);
+    void setDim3D(bool _dim_3D);
+    void setIterationLimit(int _iteration_limit);
+    void setOccupancyMap(std::vector<std::vector<double>> _occp_coords,
+                        std::vector<double> _occp_widths,
+                        std::vector<double> _occp_interval);
+    int getNodeCount();
+    bool isComplete();
+    Node* getNodeAt(int idx);
+    // Safe accessors that return node properties by value to avoid exposing
+    // raw pointers into internal containers (which can be invalidated when
+    // the RRT grows). Use these from Python to avoid lifetime / reallocation
+    // issues that can cause segfaults on large trees.
+    double getNodeX(int idx);
+    double getNodeY(int idx);
+    double getNodeTime(int idx);
+    bool isAdmissible(Node* node);
+    void updateInitialHeading(double _initial_heading);
+    py::list getForwardIndices(int idx);
+
+private:
+    std::unique_ptr<RRT> rrt_;
+};
+
+} // namespace rrt
+
+#endif /* rrtDemo_H_ */
